@@ -1,8 +1,7 @@
 # RunPod Serverless Coqui TTS
 # Uses XTTS-v2 for high-quality multilingual TTS with voice cloning
-# Model downloads on first request (cached in volume)
 
-FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
 
 WORKDIR /app
 
@@ -11,13 +10,17 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     espeak-ng \
+    git \
     && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --upgrade pip
 
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy handler (model downloads on first request)
+# Copy handler
 COPY handler.py .
 
 # Create cache directory for models
