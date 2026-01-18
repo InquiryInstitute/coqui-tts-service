@@ -140,24 +140,34 @@ def handler(job):
         if faculty_slug and faculty_slug in FACULTY_CONFIG:
             language = job_input.get("language") or FACULTY_CONFIG[faculty_slug].get("language", "en")
         
-        # If no speaker reference, we need one for XTTS
+        # If no speaker reference, use a built-in voice from XTTS
+        use_builtin_speaker = False
         if not speaker_wav_path or not os.path.exists(speaker_wav_path):
-            return {
-                "error": "No speaker reference available. Please provide speaker_wav_base64 or upload voice samples to the volume.",
-                "hint": "Upload a 6-30 second WAV file to /runpod-volume/faculty-voices/{faculty_slug}.wav"
-            }
+            use_builtin_speaker = True
+            # XTTS has built-in speakers we can use as fallback
+            builtin_speaker = "Claribel Dervla"  # Default built-in female voice
         
         # Generate audio
         with tempfile.NamedTemporaryFile(suffix=f".{output_format}", delete=False) as temp_output:
             output_path = temp_output.name
         
-        # Use voice cloning with reference audio
-        tts.tts_to_file(
-            text=text,
-            speaker_wav=speaker_wav_path,
-            language=language,
-            file_path=output_path
-        )
+        # Generate speech
+        if use_builtin_speaker:
+            # Use built-in XTTS speaker
+            tts.tts_to_file(
+                text=text,
+                speaker=builtin_speaker,
+                language=language,
+                file_path=output_path
+            )
+        else:
+            # Use voice cloning with reference audio
+            tts.tts_to_file(
+                text=text,
+                speaker_wav=speaker_wav_path,
+                language=language,
+                file_path=output_path
+            )
         
         # Read output and encode
         with open(output_path, "rb") as f:
