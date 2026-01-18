@@ -1,5 +1,5 @@
-# Simple test Dockerfile for RunPod
-FROM python:3.11-slim
+# Coqui TTS for RunPod Serverless
+FROM ghcr.io/coqui-ai/tts:latest
 
 WORKDIR /app
 
@@ -9,5 +9,8 @@ RUN pip install --no-cache-dir runpod>=1.6.0
 # Copy handler
 COPY handler.py .
 
-# RunPod serverless entry point
+# Agree to Coqui TOS
+ENV COQUI_TOS_AGREED=1
+
+# RunPod entry point
 CMD ["python", "-u", "handler.py"]
