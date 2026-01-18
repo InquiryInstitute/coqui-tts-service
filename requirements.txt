@@ -1,18 +1,9 @@
 # RunPod Serverless SDK
 runpod>=1.6.0
 
-# Coqui TTS (community maintained fork)
+# Coqui TTS (will install correct numpy version)
 TTS>=0.22.0
 
 # Audio processing
 soundfile>=0.12.0
-scipy>=1.11.0
-librosa>=0.10.0
-
-# Core dependencies
-torch>=2.0.0
-torchaudio>=2.0.0
-numpy>=1.24.0
-
-# For MP3 encoding (optional)
 pydub>=0.25.0
