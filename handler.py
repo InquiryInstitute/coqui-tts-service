@@ -1,6 +1,7 @@
 """
 RunPod Serverless Handler for Coqui TTS
 Supports XTTS-v2 with voice cloning and 16+ languages
+Model downloads on first request and is cached in volume
 """
 
 import runpod
@@ -9,16 +10,25 @@ import base64
 import io
 import os
 import tempfile
-from TTS.api import TTS
 
-# Initialize model on cold start
-print("Loading XTTS-v2 model...")
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using device: {device}")
+# Global model reference (lazy loaded)
+tts_model = None
 
-# Use XTTS-v2 for multilingual support and voice cloning
-tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-print("Model loaded successfully!")
+def get_tts_model():
+    """Lazy load the TTS model on first request"""
+    global tts_model
+    if tts_model is None:
+        from TTS.api import TTS
+        print("Loading XTTS-v2 model (this may take a few minutes on first run)...")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Using device: {device}")
+        
+        # Set environment for model caching
+        os.environ["COQUI_TOS_AGREED"] = "1"
+        
+        tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+        print("Model loaded successfully!")
+    return tts_model
 
 # Pre-defined faculty voice samples (will be loaded from volume)
 FACULTY_VOICES_DIR = "/runpod-volume/faculty-voices"
@@ -75,7 +85,7 @@ def get_speaker_wav(faculty_slug: str = None, voice_type: str = None) -> str:
     if os.path.exists(default_path):
         return default_path
     
-    # If no voice files exist, return None (will use built-in speaker)
+    # If no voice files exist, return None
     return None
 
 
@@ -90,7 +100,7 @@ def handler(job):
         speaker_wav_base64: str (optional) - Base64 encoded reference audio for voice cloning
         
     Output:
-        audio_base64: str - Base64 encoded MP3/WAV audio
+        audio_base64: str - Base64 encoded WAV audio
         duration_seconds: float - Audio duration
     """
     job_input = job["input"]
@@ -100,7 +110,7 @@ def handler(job):
     faculty_slug = job_input.get("faculty_slug")
     language = job_input.get("language", "en")
     speaker_wav_base64 = job_input.get("speaker_wav_base64")
-    output_format = job_input.get("format", "wav")  # wav or mp3
+    output_format = job_input.get("format", "wav")
     
     if not text:
         return {"error": "Text is required"}
@@ -109,6 +119,9 @@ def handler(job):
         return {"error": "Text too long (max 5000 characters)"}
     
     try:
+        # Get the TTS model (lazy loaded)
+        tts = get_tts_model()
+        
         # Determine speaker reference
         speaker_wav_path = None
         temp_speaker_file = None
@@ -127,23 +140,24 @@ def handler(job):
         if faculty_slug and faculty_slug in FACULTY_CONFIG:
             language = job_input.get("language") or FACULTY_CONFIG[faculty_slug].get("language", "en")
         
+        # If no speaker reference, we need one for XTTS
+        if not speaker_wav_path or not os.path.exists(speaker_wav_path):
+            return {
+                "error": "No speaker reference available. Please provide speaker_wav_base64 or upload voice samples to the volume.",
+                "hint": "Upload a 6-30 second WAV file to /runpod-volume/faculty-voices/{faculty_slug}.wav"
+            }
+        
         # Generate audio
         with tempfile.NamedTemporaryFile(suffix=f".{output_format}", delete=False) as temp_output:
             output_path = temp_output.name
         
-        if speaker_wav_path and os.path.exists(speaker_wav_path):
-            # Use voice cloning with reference audio
-            tts.tts_to_file(
-                text=text,
-                speaker_wav=speaker_wav_path,
-                language=language,
-                file_path=output_path
-            )
-        else:
-            # Use a built-in speaker if available
-            # XTTS doesn't have built-in speakers, so we need a reference
-            # Fall back to a simple message
-            return {"error": "No speaker reference available. Please provide speaker_wav_base64 or ensure faculty voices are configured."}
+        # Use voice cloning with reference audio
+        tts.tts_to_file(
+            text=text,
+            speaker_wav=speaker_wav_path,
+            language=language,
+            file_path=output_path
+        )
         
         # Read output and encode
         with open(output_path, "rb") as f:
@@ -151,9 +165,8 @@ def handler(job):
         
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
         
-        # Calculate approximate duration (rough estimate for WAV)
-        # More accurate would require parsing the audio file
-        duration_seconds = len(audio_bytes) / (16000 * 2)  # Assuming 16kHz mono 16-bit
+        # Calculate approximate duration
+        duration_seconds = len(audio_bytes) / (22050 * 2)  # XTTS outputs 22050Hz
         
         # Cleanup temp files
         if temp_speaker_file:
@@ -169,7 +182,11 @@ def handler(job):
         }
         
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 
 # For local testing
