@@ -18,12 +18,14 @@ def get_tts_model():
         import torch
         from TTS.api import TTS
         
-        print("Loading XTTS-v2 model...")
+        # Use faster VITS model instead of XTTS
+        print("Loading VITS model...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {device}")
         
         os.environ["COQUI_TOS_AGREED"] = "1"
-        tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+        # VITS is much smaller and faster to load
+        tts_model = TTS("tts_models/en/ljspeech/vits").to(device)
         print("Model loaded!")
     return tts_model
 
@@ -49,10 +51,9 @@ def handler(job):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             output_path = f.name
         
+        # VITS is single-speaker, no speaker/language params needed
         tts.tts_to_file(
             text=text,
-            speaker=speaker,
-            language=language,
             file_path=output_path
         )
         
