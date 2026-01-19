@@ -1,35 +1,17 @@
 """
 RunPod Serverless Handler for TTS
-Uses edge-tts for fast, lightweight TTS
+Uses edge-tts via subprocess for reliable sync operation
 """
 
 import runpod
 import base64
+import subprocess
 import tempfile
-import asyncio
-
-async def generate_tts(text, voice="en-GB-RyanNeural"):
-    """Generate TTS using edge-tts"""
-    import edge_tts
-    
-    communicate = edge_tts.Communicate(text, voice)
-    
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        output_path = f.name
-    
-    await communicate.save(output_path)
-    
-    with open(output_path, "rb") as f:
-        audio_bytes = f.read()
-    
-    import os
-    os.unlink(output_path)
-    
-    return audio_bytes
+import os
 
 
 def handler(job):
-    """TTS handler using edge-tts"""
+    """TTS handler using edge-tts CLI"""
     try:
         job_input = job.get("input", {})
         text = job_input.get("text", "")
@@ -41,19 +23,38 @@ def handler(job):
         if len(text) > 5000:
             return {"error": "Text too long (max 5000 characters)"}
         
-        print(f"Generating TTS: {text[:50]}... with voice {voice}")
+        print(f"Generating TTS: '{text[:50]}...' with voice {voice}")
         
-        audio_bytes = asyncio.run(generate_tts(text, voice))
+        # Create temp file for output
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            output_path = f.name
+        
+        # Run edge-tts via subprocess
+        cmd = ["edge-tts", "--voice", voice, "--text", text, "--write-media", output_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode != 0:
+            return {"error": f"edge-tts failed: {result.stderr}"}
+        
+        # Read the audio file
+        with open(output_path, "rb") as f:
+            audio_bytes = f.read()
+        
+        os.unlink(output_path)
+        
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
         
-        print(f"Generated {len(audio_bytes)} bytes")
+        print(f"Generated {len(audio_bytes)} bytes of audio")
         
         return {
             "audio_base64": audio_base64,
             "format": "mp3",
-            "voice": voice
+            "voice": voice,
+            "length": len(audio_bytes)
         }
         
+    except subprocess.TimeoutExpired:
+        return {"error": "TTS generation timed out"}
     except Exception as e:
         import traceback
         print(f"Error: {e}")
